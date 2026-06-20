@@ -1,29 +1,68 @@
 {
-  "name": "brh-taux-du-jour-usd-htg-api",
+  "name": "htg-rates",
   "version": "1.0.0",
-  "description": "API pour récupérer le taux de référence USD/HTG de la Banque de la République d'Haïti",
-  "main": "src/server.js",
+  "description": "Taux de change officiels USD/HTG de la BRH (Haïti) avec API, conversion, dashboard et historique JSON, prêt pour la facturation et la comptabilité.",
+  "main": "src/index.js",
   "type": "commonjs",
+  "bin": {
+    "htg-rates": "src/cli.js"
+  },
+  "exports": {
+    ".": "./src/index.js",
+    "./server": "./src/server/app.js"
+  },
+  "files": [
+    "src/",
+    "data/history/.gitkeep",
+    "openapi.yaml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "start": "node src/cli.js",
+    "dev": "nodemon src/cli.js",
+    "test": "node --test test/**/*.test.js",
+    "prepublishOnly": "npm test"
   },
   "keywords": [
     "brh",
     "taux",
     "usd",
     "htg",
-    "haiti"
+    "haiti",
+    "exchange-rate",
+    "gourde",
+    "currency",
+    "forex",
+    "fx",
+    "exchange",
+    "usd-htg",
+    "htg-usd",
+    "banque",
+    "banking",
+    "caribbean",
+    "api",
+    "finance",
+    "accounting",
+    "invoice"
   ],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
-    "express": "^4.18.2"
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.4.0",
+    "swagger-ui-express": "^5.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "supertest": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }
-

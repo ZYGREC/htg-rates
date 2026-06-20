@@ -1,191 +1,441 @@
-# Service BRH - Taux du jour USD/HTG
+# htg-rates
 
-API Node.js pour récupérer automatiquement le taux de référence USD/HTG publié chaque jour par la Banque de la République d'Haïti (BRH). Ce service permet d'exposer le taux officiel pour usage comptable et facturation.
+Package npm pour récupérer les **taux de change USD/HTG** publiés chaque jour par la [Banque de la République d'Haïti (BRH)](https://www.brh.ht/taux-du-jour/).
 
-## 📋 Prérequis
+Idéal pour la **facturation**, la **comptabilité** ou toute application qui a besoin du taux officiel haïtien.
 
-- Node.js (version 14 ou supérieure)
-- npm ou yarn
+---
 
-## 🚀 Installation
+## Sommaire
 
-```bash
-npm install
-```
+- [Installation](#installation)
+- [3 façons d'utiliser le package](#3-façons-dutiliser-le-package)
+- [Utiliser dans un autre projet Node.js](#utiliser-dans-un-autre-projet-nodejs)
+- [API REST (serveur)](#api-rest-serveur)
+- [API JavaScript (librairie)](#api-javascript-librairie)
+- [Historique JSON par année](#historique-json-par-année)
+- [Configuration](#configuration)
+- [Docker](#docker)
+- [Développement](#développement)
 
-## ▶️ Démarrage
+---
 
-### Mode production
-```bash
-npm start
-```
-
-### Mode développement (avec rechargement automatique)
-```bash
-npm run dev
-```
-
-Le serveur démarre sur le port **3000** par défaut. Vous pouvez le configurer via la variable d'environnement `PORT` :
+## Installation
 
 ```bash
-PORT=8080 npm start
+npm install htg-rates
 ```
 
-## 📡 Utilisation
+**Prérequis :** Node.js 18 ou supérieur.
 
-### Endpoint principal
+---
 
-**GET** `/api/brh/taux-du-jour`
+## 3 façons d'utiliser le package
 
-Récupère le taux de référence USD/HTG du jour publié par la BRH.
+| Mode | Commande / import | Cas d'usage |
+|------|-------------------|-------------|
+| **Librairie** | `require('htg-rates')` | Appeler les taux depuis ton code (facturation, cron, etc.) |
+| **Serveur intégré** | `require('htg-rates/server')` | Monter l'API dans une app Express existante |
+| **CLI autonome** | `npx htg-rates` | Lancer un micro-serveur sans écrire de code |
 
-#### Réponse réussie (200 OK)
+Une fois le serveur lancé :
+
+| URL | Contenu |
+|-----|---------|
+| http://localhost:3000/ | Dashboard (tableau complet + graphique d'évolution) |
+| http://localhost:3000/docs | Documentation Swagger interactive |
+| http://localhost:3000/api/brh/taux-du-jour | Taux de référence (JSON) |
+
+---
+
+## Utiliser dans un autre projet Node.js
+
+### Exemple complet — facturation
+
+```javascript
+const { getTauxComplets, convert } = require('htg-rates');
+
+async function facturer(montantUsd) {
+  // Récupère tous les taux du jour (mise en cache 15 min)
+  const taux = await getTauxComplets();
+
+  console.log(`Date BRH : ${taux.date}`);
+  console.log(`Taux de référence : ${taux.taux_reference} HTG/USD`);
+
+  // Convertir un montant
+  const conversion = await convert(montantUsd, {
+    from: 'USD',
+    to: 'HTG',
+    rateType: 'reference', // ou bancaire_vente, informel_achat, etc.
+  });
+
+  return {
+    montantUsd,
+    montantHtg: conversion.result,
+    tauxApplique: conversion.rate,
+    date: conversion.date,
+  };
+}
+
+facturer(250).then(console.log);
+```
+
+### Exemple — lire l'historique enregistré
+
+```javascript
+const { getHistory, listHistoryYears } = require('htg-rates');
+
+async function afficherHistorique() {
+  const years = await listHistoryYears();
+  console.log('Années disponibles :', years);
+
+  if (years.length === 0) {
+    console.log('Aucun historique encore. Lance un fetch avec getTauxComplets() d\'abord.');
+    return;
+  }
+
+  const { entries } = await getHistory({ year: years[years.length - 1] });
+  entries.forEach((entry) => {
+    console.log(`${entry.date} → ${entry.taux_reference}`);
+  });
+}
+```
+
+### Exemple — intégrer dans Express
+
+```javascript
+const express = require('express');
+const { createApp } = require('htg-rates/server');
+
+const app = express();
+
+// Monte toutes les routes htg-rates sous la racine
+app.use(createApp());
+
+// Tes propres routes en plus
+app.get('/ma-route', (req, res) => res.json({ ok: true }));
+
+app.listen(3000, () => {
+  console.log('App sur http://localhost:3000');
+  console.log('Taux BRH sur http://localhost:3000/api/brh/taux-du-jour');
+});
+```
+
+### Exemple — serveur autonome (sans code)
+
+```bash
+# Depuis ton projet après npm install htg-rates
+npx htg-rates
+
+# Ou avec un port personnalisé
+npx htg-rates --port 8080
+```
+
+---
+
+## API REST (serveur)
+
+### Endpoints
+
+| Méthode | Route | Description |
+|---------|-------|-------------|
+| `GET` | `/` | Dashboard HTML (tableau BRH + graphique) |
+| `GET` | `/api/brh/taux-du-jour` | Taux de référence du jour |
+| `GET` | `/api/brh/taux-complets` | Tous les taux + tableau structuré |
+| `GET` | `/api/brh/convert` | Conversion USD ↔ HTG |
+| `GET` | `/api/brh/history` | Historique JSON |
+| `GET` | `/api/brh/history/years` | Liste des années disponibles |
+| `GET` | `/health` | État du service |
+| `GET` | `/health/ready` | Prêt à recevoir du trafic |
+| `GET` | `/docs` | Swagger UI |
+
+### Paramètre commun : `?refresh=true`
+
+Force un nouveau fetch sur le site BRH (ignore le cache).
+
+```bash
+curl "http://localhost:3000/api/brh/taux-du-jour?refresh=true"
+```
+
+### `GET /api/brh/taux-du-jour`
+
+Réponse :
 
 ```json
 {
-  "date": "2024-01-15",
-  "taux_reference": 130.5983,
-  "taux_du_jour": 130.5983,
+  "date": "2026-06-20",
+  "taux_reference": 130.5549,
+  "taux_du_jour": 130.5549,
   "source": "https://www.brh.ht/taux-du-jour/"
 }
 ```
 
-**Champs de la réponse :**
-- `date` : Date du jour au format ISO (YYYY-MM-DD)
-- `taux_reference` : Taux de référence officiel USD/HTG
-- `taux_du_jour` : Alias du taux de référence (même valeur)
-- `source` : URL de la page source BRH
+### `GET /api/brh/taux-complets`
 
-#### Exemples de requêtes
+Retourne **tous les taux** affichés sur le site BRH :
 
-**Avec curl :**
+```json
+{
+  "date": "2026-06-20",
+  "taux_reference": 130.5549,
+  "marche_informel": { "achats": 131, "ventes": 136, "spread": 5 },
+  "marche_bancaire": { "achats": 130.2581, "ventes": 131.0374, "spread": 0.7793 },
+  "tma": { "achats": null, "ventes": 131.0374 },
+  "transactions_bancaires": { "achats": 15590360.15, "ventes": 15520501.18 },
+  "volume_moyen_semaine": { "achats": 17700276.4, "ventes": 17389418.29 },
+  "variations": {
+    "informel": { "jour": { "achats": 0, "ventes": 0 } },
+    "bancaire": { "jour": { "achats": 0.03, "ventes": -0.05 }, "semaine": { "achats": 0.21, "ventes": 0.07 } },
+    "reference": { "jour": 0.02, "semaine": 0.13, "annee": -0.32 },
+    "tma": { "jour": { "ventes": -0.05 } },
+    "transactions": { "jour": { "achats": 17.26, "ventes": 14.76 } }
+  },
+  "taux_reference_veille": { "date": "2025-06-18", "valeur": 130.9701 },
+  "tableau": [
+    {
+      "label": "MARCHE INFORMEL",
+      "achats": { "raw": 131, "display": "131", "kind": "rate" },
+      "ventes": { "raw": 136, "display": "136", "kind": "rate" },
+      "spread": { "raw": 5, "display": "5", "kind": "rate" }
+    }
+  ],
+  "source": "https://www.brh.ht/taux-du-jour/",
+  "fetched_at": "2026-06-20T12:00:00.000Z"
+}
+```
+
+Le champ **`tableau`** est prêt à afficher tel quel (colonnes Achats / Ventes / Spread).
+
+### `GET /api/brh/convert`
+
+| Paramètre | Requis | Description |
+|-----------|--------|-------------|
+| `amount` | oui | Montant à convertir |
+| `from` | oui | `USD` ou `HTG` |
+| `to` | oui | `USD` ou `HTG` |
+| `rateType` | non | Type de taux (défaut : `reference`) |
+| `refresh` | non | `true` pour ignorer le cache |
+
 ```bash
-curl http://localhost:3000/api/brh/taux-du-jour
+curl "http://localhost:3000/api/brh/convert?amount=100&from=USD&to=HTG"
+curl "http://localhost:3000/api/brh/convert?amount=100&from=USD&to=HTG&rateType=bancaire_vente"
 ```
 
-**Avec fetch (JavaScript) :**
-```javascript
-fetch('http://localhost:3000/api/brh/taux-du-jour')
-  .then(response => response.json())
-  .then(data => console.log(data))
-  .catch(error => console.error('Erreur:', error));
-```
-
-**Avec axios (JavaScript) :**
-```javascript
-const axios = require('axios');
-
-axios.get('http://localhost:3000/api/brh/taux-du-jour')
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Erreur:', error.message));
-```
-
-### Endpoint de santé
-
-**GET** `/health`
-
-Vérifie que le serveur est opérationnel.
+Réponse :
 
 ```json
 {
-  "status": "ok"
+  "amount": 100,
+  "from": "USD",
+  "to": "HTG",
+  "rate": 130.5549,
+  "rate_type": "reference",
+  "result": 13055.49,
+  "date": "2026-06-20",
+  "source": "https://www.brh.ht/taux-du-jour/"
 }
 ```
 
-### Gestion des erreurs
+**Types de taux (`rateType`) :**
 
-En cas d'erreur (réseau, parsing, site BRH indisponible, etc.), l'API retourne un statut HTTP **500** avec un message d'erreur explicite :
+| Valeur | Description |
+|--------|-------------|
+| `reference` | Taux de référence BRH *(défaut)* |
+| `bancaire_achat` | Marché bancaire — achats |
+| `bancaire_vente` | Marché bancaire — ventes |
+| `informel_achat` | Marché informel — achats |
+| `informel_vente` | Marché informel — ventes |
+
+### `GET /api/brh/history`
+
+| Paramètre | Description |
+|-----------|-------------|
+| `year` | Année (ex. `2026`) |
+| `from` | Date début `YYYY-MM-DD` |
+| `to` | Date fin `YYYY-MM-DD` |
+
+```bash
+curl "http://localhost:3000/api/brh/history?year=2026"
+curl "http://localhost:3000/api/brh/history/years"
+```
+
+---
+
+## API JavaScript (librairie)
+
+Toutes les fonctions sont **async** (retournent une Promise).
+
+### Récupérer les taux
+
+```javascript
+const { getTauxDuJour, getTauxComplets } = require('htg-rates');
+
+// Taux de référence uniquement
+const simple = await getTauxDuJour();
+// → { date, taux_reference, taux_du_jour, source }
+
+// Tous les taux + tableau
+const complet = await getTauxComplets();
+// → { date, taux_reference, marche_informel, tableau, ... }
+
+// Forcer un nouveau fetch BRH
+const frais = await getTauxComplets({ forceRefresh: true });
+```
+
+### Convertir
+
+```javascript
+const { convert } = require('htg-rates');
+
+const result = await convert(100, {
+  from: 'USD',
+  to: 'HTG',
+  rateType: 'reference', // optionnel
+});
+// → { amount, from, to, rate, rate_type, result, date, source }
+```
+
+### Historique
+
+```javascript
+const {
+  getHistory,
+  listHistoryYears,
+  saveToHistory,
+  getHistoryDir,
+} = require('htg-rates');
+
+// Lire l'historique
+const years = await listHistoryYears();           // [2025, 2026]
+const file2026 = await getHistory({ year: 2026 }); // fichier JSON de l'année
+const plage = await getHistory({ from: '2026-01-01', to: '2026-06-30' });
+
+// Chemin du dossier historique
+console.log(getHistoryDir()); // ex. /mon-projet/data/history
+
+// Sauvegarde manuelle (normalement automatique à chaque fetch)
+await saveToHistory(complet);
+```
+
+### Serveur Express
+
+```javascript
+const { createApp, clearCache } = require('htg-rates');
+
+const app = createApp({
+  corsOrigin: '*',       // optionnel
+  rateLimit: true,       // optionnel (défaut: true)
+});
+
+clearCache(); // vider le cache mémoire
+```
+
+### Référence complète
+
+| Fonction | Description |
+|----------|-------------|
+| `getTauxDuJour(options?)` | Taux de référence du jour |
+| `getTauxComplets(options?)` | Tous les taux BRH + `tableau` |
+| `convert(amount, options?)` | Conversion USD ↔ HTG |
+| `getHistory(options?)` | Lit l'historique (`year`, `from`, `to`) |
+| `listHistoryYears(options?)` | Liste les années disponibles |
+| `loadHistoryYear(year, options?)` | Charge le fichier JSON d'une année |
+| `saveToHistory(data, options?)` | Enregistre une entrée dans l'historique |
+| `getHistoryDir()` | Chemin du dossier `data/history` |
+| `createApp(options?)` | Crée l'application Express |
+| `clearCache()` | Vide le cache mémoire |
+| `getHealthState()` | État cache + BRH |
+| `isReady()` | `true` si des données BRH sont disponibles |
+
+**Options communes :**
+
+```javascript
+{ forceRefresh: true }  // ignore le cache mémoire
+{ skipHistory: true }   // ne pas sauvegarder dans l'historique JSON
+{ dataDir: '/chemin' }  // dossier historique personnalisé (pour getHistory, saveToHistory)
+```
+
+---
+
+## Historique JSON par année
+
+À **chaque fetch réussi** vers la BRH, le package enregistre automatiquement les données dans :
+
+```
+votre-projet/data/history/2026.json
+votre-projet/data/history/2027.json
+...
+```
+
+Structure d'un fichier :
 
 ```json
 {
-  "error": "TAUX DE REFERENCE introuvable dans le HTML"
+  "year": 2026,
+  "source": "https://www.brh.ht/taux-du-jour/",
+  "updated_at": "2026-06-20T12:00:00.000Z",
+  "entries": [
+    {
+      "date": "2026-06-20",
+      "taux_reference": 130.5549,
+      "marche_informel": { "achats": 131, "ventes": 136, "spread": 5 },
+      "tableau": []
+    }
+  ]
 }
 ```
 
-**Exemples d'erreurs possibles :**
-- `"Timeout lors de la récupération de la page BRH"`
-- `"TAUX DE REFERENCE introuvable dans le HTML"`
-- `"Impossible de se connecter au site BRH (vérifiez votre connexion réseau)"`
-- `"Erreur HTTP 404: Not Found"`
+> **Important :** l'historique se construit **jour après jour** à chaque utilisation du package. Il n'y a pas de données passées fournies par la BRH sur une seule requête — plus tu utilises le package, plus l'historique grandit.
 
-## 📁 Structure du projet
+Le dashboard sur `/` affiche un **graphique d'évolution** basé sur ces fichiers.
 
+---
+
+## Configuration
+
+Copie `.env.example` vers `.env` à la racine de ton projet :
+
+```bash
+cp .env.example .env
 ```
-brh-taux-du-jour-usd-htg-api/
-├── package.json           # Configuration npm et dépendances
-├── README.md              # Documentation du projet
-└── src/
-    ├── brhClient.js       # Récupération HTML + parsing avec Cheerio
-    ├── tauxService.js     # Logique métier (orchestration)
-    └── server.js          # Serveur Express et endpoints API
-```
-
-### Description des modules
-
-- **`src/brhClient.js`** : Gère la communication avec le site BRH
-  - `fetchBrhHtml()` : Récupère le HTML de la page des taux
-  - `extractTauxReference(html)` : Parse le HTML et extrait le taux de référence
-
-- **`src/tauxService.js`** : Couche de service métier
-  - `getTauxDuJour()` : Fonction principale qui orchestre la récupération et formate les données
-
-- **`src/server.js`** : Serveur Express et routes API
-  - Configure le serveur HTTP
-  - Gère les endpoints et les erreurs
-
-## 📦 Dépendances
-
-### Production
-- **axios** (^1.6.0) : Client HTTP pour récupérer le contenu de la page BRH
-- **cheerio** (^1.0.0-rc.12) : Parseur HTML côté serveur (similaire à jQuery)
-- **express** (^4.18.2) : Framework web minimaliste pour Node.js
-
-### Développement
-- **nodemon** (^3.0.1) : Outil de développement pour recharger automatiquement le serveur
-
-## 🔧 Configuration
-
-### Variables d'environnement
 
 | Variable | Description | Défaut |
 |----------|-------------|--------|
-| `PORT` | Port d'écoute du serveur | `3000` |
+| `PORT` | Port du serveur CLI | `3000` |
+| `BRH_URL` | URL page BRH | `https://www.brh.ht/taux-du-jour/` |
+| `BRH_TIMEOUT_MS` | Timeout requête BRH (ms) | `10000` |
+| `BRH_RETRIES` | Tentatives en cas d'échec | `3` |
+| `CACHE_TTL_MS` | Durée cache mémoire (ms) | `900000` (15 min) |
+| `SERVE_STALE_ON_ERROR` | Servir le cache si BRH down | `true` |
+| `SAVE_HISTORY` | Enregistrer l'historique JSON | `true` |
+| `HISTORY_DATA_DIR` | Dossier des fichiers historiques | `./data/history` |
+| `CORS_ORIGIN` | Origine CORS | `*` |
+| `RATE_LIMIT_WINDOW_MS` | Fenêtre rate limit (ms) | `60000` |
+| `RATE_LIMIT_MAX` | Requêtes max / fenêtre / IP | `60` |
 
-Exemple :
+---
+
+## Docker
+
 ```bash
-PORT=8080 npm start
+docker compose up --build
+# → http://localhost:3000
 ```
 
-## ⚙️ Fonctionnement technique
+---
 
-1. **Récupération** : Le service fait une requête HTTP GET sur `https://www.brh.ht/taux-du-jour/` avec un User-Agent réaliste
-2. **Parsing** : Le HTML est analysé avec Cheerio pour trouver la ligne contenant "TAUX DE REFERENCE"
-3. **Extraction** : La valeur numérique correspondante est extraite et convertie en nombre
-4. **Formatage** : Les données sont formatées avec la date du jour et la source
-5. **API** : Le résultat est exposé via une API REST JSON
+## Développement
 
-## 📝 Notes
+```bash
+git clone <repo>
+cd htg-rates
+npm install
+npm run dev    # serveur avec rechargement auto
+npm test       # 27 tests
+```
 
-- Le service récupère le taux en temps réel à chaque appel de l'API (pas de cache)
-- Le taux est celui publié sur le site BRH le jour de la requête
-- La page source est consultée à chaque requête API
+---
 
-## 🐛 Dépannage
-
-**Le serveur ne démarre pas :**
-- Vérifiez que le port n'est pas déjà utilisé
-- Assurez-vous que toutes les dépendances sont installées (`npm install`)
-
-**L'API retourne une erreur :**
-- Vérifiez votre connexion internet
-- Vérifiez que le site BRH est accessible : https://www.brh.ht/taux-du-jour/
-- Consultez les logs du serveur pour plus de détails
-
-**Le taux n'est pas trouvé :**
-- Le format de la page BRH peut avoir changé
-- Vérifiez que la page contient bien "TAUX DE REFERENCE"
-
-## 📄 Licence
+## Licence
 
 ISC
-

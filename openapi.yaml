@@ -1,0 +1,188 @@
+openapi: 3.0.3
+info:
+  title: htg-rates API
+  description: |
+    API pour les taux USD/HTG publiés par la BRH (Banque de la République d'Haïti).
+
+    **Liens utiles :**
+    - Dashboard : `/`
+    - Cette doc : `/docs`
+
+    **Paramètre commun :** ajoutez `?refresh=true` sur les endpoints de taux pour forcer un nouveau fetch BRH.
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+    description: Serveur local
+
+tags:
+  - name: Taux
+    description: Taux du jour et données complètes BRH
+  - name: Conversion
+    description: Conversion USD ↔ HTG
+  - name: Historique
+    description: Fichiers JSON d'évolution par année
+  - name: Santé
+    description: Monitoring du service
+
+paths:
+  /api/brh/taux-du-jour:
+    get:
+      tags: [Taux]
+      summary: Taux de référence du jour
+      description: Retourne le taux de référence officiel USD/HTG. Format simple et rétrocompatible.
+      parameters:
+        - $ref: '#/components/parameters/refresh'
+      responses:
+        '200':
+          description: Taux de référence
+          content:
+            application/json:
+              example:
+                date: "2026-06-20"
+                taux_reference: 130.5549
+                taux_du_jour: 130.5549
+                source: "https://www.brh.ht/taux-du-jour/"
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/brh/taux-complets:
+    get:
+      tags: [Taux]
+      summary: Tous les taux BRH
+      description: |
+        Retourne l'ensemble des données du site BRH :
+        marché informel, marché bancaire, TMA, transactions bancaires,
+        variations et le champ `tableau` prêt à afficher.
+      parameters:
+        - $ref: '#/components/parameters/refresh'
+      responses:
+        '200':
+          description: Données complètes
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/brh/convert:
+    get:
+      tags: [Conversion]
+      summary: Conversion USD ↔ HTG
+      description: Convertit un montant selon le taux BRH du jour.
+      parameters:
+        - name: amount
+          in: query
+          required: true
+          schema:
+            type: number
+          example: 100
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [USD, HTG]
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [USD, HTG]
+        - name: rateType
+          in: query
+          schema:
+            type: string
+            enum: [reference, bancaire_achat, bancaire_vente, informel_achat, informel_vente]
+            default: reference
+          description: Type de taux à appliquer
+        - $ref: '#/components/parameters/refresh'
+      responses:
+        '200':
+          description: Résultat de conversion
+          content:
+            application/json:
+              example:
+                amount: 100
+                from: USD
+                to: HTG
+                rate: 130.5549
+                rate_type: reference
+                result: 13055.49
+                date: "2026-06-20"
+        '400':
+          description: Paramètres manquants ou invalides
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /api/brh/history:
+    get:
+      tags: [Historique]
+      summary: Historique des taux
+      description: |
+        Lit les fichiers JSON enregistrés dans `data/history/`.
+        L'historique grandit à chaque fetch BRH réussi.
+      parameters:
+        - name: year
+          in: query
+          schema:
+            type: integer
+          example: 2026
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          description: Historique JSON
+
+  /api/brh/history/years:
+    get:
+      tags: [Historique]
+      summary: Années disponibles
+      description: Liste les années pour lesquelles un fichier `YYYY.json` existe.
+      responses:
+        '200':
+          description: Liste des années
+          content:
+            application/json:
+              example:
+                years: [2025, 2026]
+
+  /health:
+    get:
+      tags: [Santé]
+      summary: État de santé
+      responses:
+        '200':
+          description: Service opérationnel
+
+  /health/ready:
+    get:
+      tags: [Santé]
+      summary: Prêt à servir
+      description: Retourne 503 tant qu'aucune donnée BRH n'a été récupérée.
+      responses:
+        '200':
+          description: Prêt
+        '503':
+          description: Non prêt
+
+components:
+  parameters:
+    refresh:
+      name: refresh
+      in: query
+      schema:
+        type: boolean
+      description: Force le rafraîchissement du cache et un nouveau fetch BRH
+
+  responses:
+    ServerError:
+      description: Erreur serveur (BRH inaccessible, parsing échoué, etc.)
+      content:
+        application/json:
+          example:
+            error: "TAUX DE REFERENCE introuvable dans le HTML"

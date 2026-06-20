@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>htg-rates — Taux BRH</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4f;
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --accent-soft: rgba(59, 130, 246, 0.15);
+      --green: #22c55e;
+      --red: #ef4444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 3rem;
+    }
+
+    header {
+      margin-bottom: 2rem;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 0.35rem;
+    }
+
+    .hero-rate {
+      margin-top: 1.25rem;
+      padding: 1.25rem 1.5rem;
+      background: linear-gradient(135deg, var(--accent-soft), transparent);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      display: flex;
+      align-items: baseline;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .hero-rate .value {
+      font-size: 2.5rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .hero-rate .label {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+      margin-top: 1.5rem;
+    }
+
+    @media (min-width: 900px) {
+      .grid { grid-template-columns: 1fr 1fr; }
+      .chart-card { grid-column: 1 / -1; }
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+
+    .card h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .controls {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+      margin-bottom: 1rem;
+    }
+
+    select, button {
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.5rem 0.85rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+
+    button:hover { border-color: var(--accent); }
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 0.65rem 0.75rem;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th:first-child, td:first-child {
+      text-align: left;
+      font-weight: 500;
+    }
+
+    th {
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+
+    tr.section td:first-child {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    tr.variation td:first-child {
+      padding-left: 1.25rem;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 320px;
+    }
+
+    .status {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-top: 0.75rem;
+    }
+
+    .error {
+      color: var(--red);
+      padding: 0.75rem;
+      background: rgba(239, 68, 68, 0.1);
+      border-radius: 8px;
+      margin-top: 1rem;
+      display: none;
+    }
+
+    .links {
+      margin-top: 1rem;
+      display: flex;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+
+    .links a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+
+    .links a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Taux du jour — BRH</h1>
+      <p class="subtitle">Banque de la République d'Haïti · USD/HTG</p>
+      <div class="hero-rate">
+        <span class="value" id="heroRate">—</span>
+        <span class="label">Taux de référence · <span id="heroDate">—</span></span>
+      </div>
+      <div class="links">
+        <a href="/docs">API Swagger</a>
+        <a href="/api/brh/taux-complets">JSON complet</a>
+        <a href="/api/brh/history/years">Années disponibles</a>
+      </div>
+    </header>
+
+    <div class="error" id="error"></div>
+
+    <div class="grid">
+      <div class="card chart-card">
+        <h2>Évolution du taux de référence</h2>
+        <div class="controls">
+          <select id="yearSelect"></select>
+          <button id="refreshBtn" class="primary">Rafraîchir</button>
+        </div>
+        <div class="chart-wrap">
+          <canvas id="rateChart"></canvas>
+        </div>
+        <p class="status" id="chartStatus"></p>
+      </div>
+
+      <div class="card" style="grid-column: 1 / -1;">
+        <h2>Tableau complet des taux</h2>
+        <table>
+          <thead>
+            <tr>
+              <th></th>
+              <th>Achats</th>
+              <th>Ventes</th>
+              <th>Spread</th>
+            </tr>
+          </thead>
+          <tbody id="ratesTable"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let chart = null;
+
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.textContent = message;
+      el.style.display = 'block';
+    }
+
+    function hideError() {
+      document.getElementById('error').style.display = 'none';
+    }
+
+    function rowClass(label) {
+      if (label.startsWith('Variation') || label.startsWith('Volume')) return 'variation';
+      if (['MARCHE INFORMEL', 'MARCHE BANCAIRE', 'TAUX DE REFERENCE', "TAUX MOYEN D'ACQUISITION (TMA)", 'TRANSACTION BANCAIRES'].includes(label)) {
+        return 'section';
+      }
+      return '';
+    }
+
+    function renderTable(tableau) {
+      const tbody = document.getElementById('ratesTable');
+      tbody.innerHTML = '';
+
+      (tableau || []).forEach((row) => {
+        const tr = document.createElement('tr');
+        tr.className = rowClass(row.label);
+        tr.innerHTML = `
+          <td>${row.label}</td>
+          <td>${row.achats.display}</td>
+          <td>${row.ventes.display}</td>
+          <td>${row.spread.display}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function renderChart(entries, year) {
+      const ctx = document.getElementById('rateChart');
+      const labels = entries.map((e) => e.date);
+      const data = entries.map((e) => e.taux_reference);
+
+      if (chart) chart.destroy();
+
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Taux de référence',
+            data,
+            borderColor: '#3b82f6',
+            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: entries.length > 60 ? 0 : 3,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: '#8b9cb3' } },
+          },
+          scales: {
+            x: {
+              ticks: { color: '#8b9cb3', maxTicksLimit: 12 },
+              grid: { color: '#2d3a4f' },
+            },
+            y: {
+              ticks: { color: '#8b9cb3' },
+              grid: { color: '#2d3a4f' },
+            },
+          },
+        },
+      });
+
+      document.getElementById('chartStatus').textContent =
+        entries.length > 0
+          ? `${entries.length} point(s) enregistré(s) pour ${year}`
+          : `Aucune donnée historique pour ${year}. Les données s'accumulent à chaque visite.`;
+    }
+
+    async function loadYears() {
+      const res = await fetch('/api/brh/history/years');
+      const data = await res.json();
+      const select = document.getElementById('yearSelect');
+      const years = data.years?.length ? data.years : [new Date().getFullYear()];
+
+      select.innerHTML = years
+        .sort((a, b) => b - a)
+        .map((y) => `<option value="${y}">${y}</option>`)
+        .join('');
+
+      return parseInt(select.value, 10);
+    }
+
+    async function loadHistory(year) {
+      const res = await fetch(`/api/brh/history?year=${year}`);
+      const data = await res.json();
+      renderChart(data.entries || [], year);
+    }
+
+    async function loadCurrent(refresh = false) {
+      const url = refresh ? '/api/brh/taux-complets?refresh=true' : '/api/brh/taux-complets';
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Erreur de chargement');
+      }
+
+      const data = await res.json();
+      document.getElementById('heroRate').textContent = data.taux_reference;
+      document.getElementById('heroDate').textContent = data.date;
+      renderTable(data.tableau);
+      return data;
+    }
+
+    async function init() {
+      try {
+        hideError();
+        await loadCurrent();
+        const year = await loadYears();
+        await loadHistory(year);
+
+        document.getElementById('yearSelect').addEventListener('change', (e) => {
+          loadHistory(parseInt(e.target.value, 10));
+        });
+
+        document.getElementById('refreshBtn').addEventListener('click', async () => {
+          await loadCurrent(true);
+          const year = parseInt(document.getElementById('yearSelect').value, 10);
+          await loadYears();
+          await loadHistory(year);
+        });
+      } catch (error) {
+        showError(error.message);
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
